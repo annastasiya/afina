@@ -44,9 +44,11 @@ namespace Afina {
                 /**
                  * Methos is running for each connection
                  */
-                void RunConnection();
+                void RunConnection(int client);
                 
             private:
+	        void ShutdownConnection(int client);
+
                 static void *RunAcceptorProxy(void *p);
                 static void *RunConnectionProxy(void *p);
                 
@@ -54,10 +56,10 @@ namespace Afina {
                 // flag must be atomic in order to safely publisj changes cross thread
                 // bounds
                 std::atomic<bool> running;
-                int client_socket;
-                std::mutex client_lock;
-                std::condition_variable variable_lock;
-                bool client_ok;
+                //int client_socket;
+                //std::mutex client_lock;
+                //std::condition_variable variable_lock;
+                //bool client_ok;
                 // Thread that is accepting new connections
                 pthread_t accept_thread;
                 
@@ -80,7 +82,10 @@ namespace Afina {
                 
                 // Threads that are processing connection data, permits
                 // access only from inside of accept_thread
-                std::unordered_set<pthread_t> connections;
+		
+		// we need not save pthread_t as we have bijection between (int)client_socket and executing threads
+		// 
+                std::unordered_set<int> connections;
             };
             
         } // namespace Blocking

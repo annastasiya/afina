@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
 #include <pthread.h>
 #include <signal.h>
@@ -35,12 +36,15 @@ namespace Afina {
             }
             
             void *ServerImpl::RunConnectionProxy(void *p) {
-                ServerImpl *srv = reinterpret_cast<ServerImpl *>(p);
+		auto args = reinterpret_cast<std::pair<ServerImpl*, int>*>(p);
+                ServerImpl *srv = args->first;
+		int client = args->second;
                 try {
-                    srv->RunConnection();
+                    srv->RunConnection(client);
                 } catch (std::runtime_error &ex) {
                     std::cerr << "Server fails: " << ex.what() << std::endl;
                 }
+		delete args;
                 return 0;
             }
             
@@ -80,6 +84,12 @@ namespace Afina {
             void ServerImpl::Stop() {
                 std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
                 running.store(false);
+
+                std::unique_lock<std::mutex> __lock(connections_mutex);
+                while (!connections.empty()) {
+                    connections_cv.wait(__lock);
+                }
+
             }
             
             // See Server.h
@@ -146,10 +156,12 @@ namespace Afina {
                     throw std::runtime_error("Socket listen() failed");
                 }
                 
-                
+                int client_socket;
                 struct sockaddr_in client_addr;
                 socklen_t sinSize = sizeof(struct sockaddr_in);
+		/*
                 std::unique_lock<std::mutex> lock(client_lock);
+		*/
                 while (running.load()) {
                     std::cout << "network debug: waiting for connection..." << std::endl;
                     
@@ -159,8 +171,9 @@ namespace Afina {
                         close(server_socket);
                         throw std::runtime_error("Socket accept() failed");
                     }
-                    // ждем пока сдохнут
-                    for (auto i = connections.begin(); i != connections.end(); /*FIXME*/)
+                    //not ждем пока сдохнут
+		    /*	
+                    for (auto i = connections.begin(); i != connections.end(); ++i)
                     {
                         if(pthread_kill(*i, 0) != 0)
                         {
@@ -170,50 +183,67 @@ namespace Afina {
                         }
                         else i++;
                     }
+	            */
                     
-                    if (connections.size()< max_workers)
+                    if (connections.size() < max_workers)
                     {
                         pthread_t client_thread;
+			/*
                         client_ok = false;
-                        pthread_create(&client_thread, nullptr, RunConnectionProxy, this);
+			*/
+
+			auto args = new std::pair<ServerImpl*, int>(this, client_socket);
+                        pthread_create(&client_thread, nullptr, RunConnectionProxy, args);
+			pthread_detach(client_thread);
+			/*
                         while (!client_ok) {
                             variable_lock.wait(lock);
                         }
-                        connections.insert(client_thread);
+			*/
+                        connections.insert(client_socket);
                     }
                     else
                     {
-                        shutdown(client_socket,SHUT_RDWR);
+                        shutdown(client_socket, SHUT_RDWR);
                         close(client_socket);
                         
                     }
-                    //
                 }
-                
-                for (auto i = connections.begin(); i != connections.end(); /*FIXME*/)
+               	/* 
+                for (auto i = connections.begin(); i != connections.end(); ++i)
                 {
-                    
                     pthread_join(*i, nullptr);
-                    i++;
                 }
-                
+                */
                 // Cleanup on exit...
-                shutdown(server_socket,SHUT_RDWR);
+                shutdown(server_socket, SHUT_RDWR);
                 close(server_socket);
                 
                 // Wait until for all connections to be complete
+		/*
                 std::unique_lock<std::mutex> __lock(connections_mutex);
                 while (!connections.empty()) {
                     connections_cv.wait(__lock);
                 }
+		*/
             }
             
             
             static const size_t read_buffer_size = 256;
             
+	    void ServerImpl::ShutdownConnection(int client) {
+		{
+		    std::unique_lock<std::mutex> lk(connections_mutex);
+                    connections.erase(client);
+		}
+                shutdown(client, SHUT_RDWR);
+                close(client);
+		connections_cv.notify_one();
+	    }
             
             // See Server.h
-            void ServerImpl::RunConnection() {
+            void ServerImpl::RunConnection(int client) {
+		/*
                 int client;
                 {
                     std::lock_guard<std::mutex> lock(client_lock);
@@ -221,7 +251,7 @@ namespace Afina {
                     client_ok = true;
                     variable_lock.notify_one();
                 }
-                
+                */
                 Protocol::Parser parser;
                 std::vector<char> buf;
                 buf.resize(read_buffer_size);
@@ -243,9 +273,12 @@ namespace Afina {
                             // append whatever the client may have sent
                             received = recv(client, buf.data() + offset, buf.size() - offset, 0);
                             if (received <= 0) { // client bails out, no command to execute
+				/*
                                 shutdown(client, SHUT_RDWR);
                                 close(client);
                                 return;
+				*/
+				ShutdownConnection(client);
                             } else
                                 offset += received;
                         }
@@ -271,9 +304,12 @@ namespace Afina {
                             while (offset < arg_size) { // append the body we know the size of
                                 received = recv(client, buf.data() + offset, buf.size() - offset, 0);
                                 if (received <= 0) { // client bails out, no data to store
+				    /*
                                     shutdown(client, SHUT_RDWR);
                                     close(client);
                                     return;
+				    */
+				    ShutdownConnection(client);
                                 }
                                 offset += received;
                             }
@@ -300,20 +336,26 @@ namespace Afina {
                         while (offset < out.size()) { // classical "send until nothing left or error" loop
                             sent = send(client, out.data() + offset, out.size() - offset, 0);
                             if (sent <= 0) { // client bails out, reply not sent
+				/*
                                 shutdown(client, SHUT_RDWR);
                                 close(client);
                                 return;
+				*/
+				ShutdownConnection(client);
                             }
                             offset += sent;
                         }
                         if (bail_out) {
+			    /*
                             shutdown(client, SHUT_RDWR);
                             close(client);
                             return;
+			    */
+			    ShutdownConnection(client);
                         }
                     }
-                    
                 }
+	        ShutdownConnection(client);
             }
         } // namespace Blocking
     } // namespace Network
