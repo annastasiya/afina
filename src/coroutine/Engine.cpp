@@ -71,6 +71,12 @@ namespace Afina {
                 }
                 else {
                     to_call = alive;
+                    while(to_call == cur_routine) {
+                        to_call = to_call->next;
+                    }
+                    if (to_call == nullptr) {
+                        return;
+                    }
                 }
             }
             
