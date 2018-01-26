@@ -11,7 +11,6 @@ class Storage;
 
 namespace Network {
 namespace NonBlocking {
-
 /**
  * # Thread running epoll
  * On Start spaws background thread that is doing epoll on the given server
@@ -42,6 +41,7 @@ public:
      * been destoryed
      */
     void Join();
+    
 
 protected:
     /**
