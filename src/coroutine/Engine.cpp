@@ -20,7 +20,7 @@ namespace Afina {
             
             // If dst and src overlap, behavior is undefined. To avoid this, we make:
             if (std::get<1>(ctx.Stack)<size){
-                delete std::get<0>(ctx.Stack);
+                delete[] std::get<0>(ctx.Stack);
                 std::get<0>(ctx.Stack) = new char[size];
                 std::get<1>(ctx.Stack) = size;
             }
